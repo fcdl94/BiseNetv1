@@ -1,17 +1,36 @@
 import argparse
-from torch.utils.data import Dataset
+from dataset.transform import *
+from torchvision.datasets import VOCSegmentation as VOC
 from torch.utils.data import DataLoader
 from dataset.CamVid import CamVid
 import os
 from model.build_BiSeNet import BiSeNet
 import torch
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 import tqdm
 import numpy as np
 from utils import poly_lr_scheduler
 from utils import reverse_one_hot, compute_global_accuracy, fast_hist, \
     per_class_iu
 from loss import DiceLoss
+
+
+def get_transform():
+    train_transform = Compose([
+        RandomResizedCrop(320, (0.5, 2.0)),
+        RandomHorizontalFlip(),
+        ToTensor(),
+        Normalize(mean=[0.485, 0.456, 0.406],
+                  std=[0.229, 0.224, 0.225]),
+    ])
+    val_transform = Compose([
+        PadCenterCrop(size=512),
+        ToTensor(),
+        Normalize(mean=[0.485, 0.456, 0.406],
+                  std=[0.229, 0.224, 0.225]),
+    ])
+
+    return train_transform, val_transform
 
 
 def val(args, model, dataloader):
@@ -141,13 +160,10 @@ def main(params):
     args = parser.parse_args(params)
 
     # create dataset and dataloader
-    train_path = [os.path.join(args.data, 'train'), os.path.join(args.data, 'val')]
-    train_label_path = [os.path.join(args.data, 'train_labels'), os.path.join(args.data, 'val_labels')]
-    test_path = os.path.join(args.data, 'test')
-    test_label_path = os.path.join(args.data, 'test_labels')
-    csv_path = os.path.join(args.data, 'class_dict.csv')
-    dataset_train = CamVid(train_path, train_label_path, csv_path, scale=(args.crop_height, args.crop_width),
-                           loss=args.loss, mode='train')
+    train_path = args.data
+    train_transform, val_transform = get_transform()
+
+    dataset_train = VOC(train_path, image_set="train", download=True, transforms=train_transform)
     dataloader_train = DataLoader(
         dataset_train,
         batch_size=args.batch_size,
@@ -155,12 +171,10 @@ def main(params):
         num_workers=args.num_workers,
         drop_last=True
     )
-    dataset_val = CamVid(test_path, test_label_path, csv_path, scale=(args.crop_height, args.crop_width),
-                         loss=args.loss, mode='test')
+    dataset_val = VOC(train_path, image_set="val", download=True, transforms=val_transform)
     dataloader_val = DataLoader(
         dataset_val,
-        # this has to be 1
-        batch_size=1,
+        batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers
     )
@@ -191,7 +205,7 @@ def main(params):
     # train
     train(args, model, optimizer, dataloader_train, dataloader_val)
 
-    # val(args, model, dataloader_val, csv_path)
+    val(args, model, dataloader_val)
 
 
 if __name__ == '__main__':
