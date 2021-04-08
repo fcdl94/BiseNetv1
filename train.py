@@ -43,23 +43,18 @@ def val(args, model, dataloader):
         for i, (data, label) in enumerate(dataloader):
             if torch.cuda.is_available() and args.use_gpu:
                 data = data.cuda()
-                label = label.cuda()
+                label = label.cuda().long()
+
+            output = model(data)
 
             # get RGB predict image
-            predict = model(data).squeeze()
-            predict = reverse_one_hot(predict)
-            predict = np.array(predict.cpu())
-
-            # get RGB label image
-            label = label.squeeze()
-            if args.loss == 'dice':
-                label = reverse_one_hot(label)
-            label = np.array(label.cpu())
+            _, prediction = output.max(dim=1)  # B, H, W
+            label = label.cpu().numpy()
+            prediction = prediction.cpu().numpy()
 
             # compute per pixel accuracy
-
-            precision = compute_global_accuracy(predict, label)
-            hist += fast_hist(label.flatten(), predict.flatten(), args.num_classes)
+            precision = compute_global_accuracy(prediction, label)
+            hist += fast_hist(label.flatten(), prediction.flatten(), args.num_classes)
 
             # there is no need to transform the one-hot array to visual RGB array
             # predict = colour_code_segmentation(np.array(predict), label_info)
@@ -85,7 +80,7 @@ def train(args, model, optimizer, dataloader_train, dataloader_val):
     if args.loss == 'dice':
         loss_func = DiceLoss()
     elif args.loss == 'crossentropy':
-        loss_func = torch.nn.CrossEntropyLoss()
+        loss_func = torch.nn.CrossEntropyLoss(ignore_index=255)
     max_miou = 0
     step = 0
     for epoch in range(args.num_epochs):
@@ -97,7 +92,8 @@ def train(args, model, optimizer, dataloader_train, dataloader_val):
         for i, (data, label) in enumerate(dataloader_train):
             if torch.cuda.is_available() and args.use_gpu:
                 data = data.cuda()
-                label = label.cuda()
+                label = label.cuda().long()
+
             output, output_sup1, output_sup2 = model(data)
             loss1 = loss_func(output, label)
             loss2 = loss_func(output_sup1, label)
@@ -111,6 +107,7 @@ def train(args, model, optimizer, dataloader_train, dataloader_val):
             step += 1
             writer.add_scalar('loss_step', loss, step)
             loss_record.append(loss.item())
+            print('\r')
         tq.close()
         loss_train_mean = np.mean(loss_record)
         writer.add_scalar('epoch/loss_epoch_train', float(loss_train_mean), epoch)
@@ -125,7 +122,7 @@ def train(args, model, optimizer, dataloader_train, dataloader_val):
             precision, miou = val(args, model, dataloader_val)
             if miou > max_miou:
                 max_miou = miou
-                import os 
+                import os
                 os.makedirs(args.save_model_path, exist_ok=True)
                 torch.save(model.module.state_dict(),
                            os.path.join(args.save_model_path, 'best_dice_loss.pth'))
@@ -140,14 +137,13 @@ def main(params):
     parser.add_argument('--epoch_start_i', type=int, default=0, help='Start counting epochs from this number')
     parser.add_argument('--checkpoint_step', type=int, default=100, help='How often to save checkpoints (epochs)')
     parser.add_argument('--validation_step', type=int, default=10, help='How often to perform validation (epochs)')
-    parser.add_argument('--dataset', type=str, default="CamVid", help='Dataset you are using.')
     parser.add_argument('--crop_height', type=int, default=720, help='Height of cropped/resized input image to network')
     parser.add_argument('--crop_width', type=int, default=960, help='Width of cropped/resized input image to network')
     parser.add_argument('--batch_size', type=int, default=1, help='Number of images in each batch')
     parser.add_argument('--context_path', type=str, default="resnet101",
                         help='The context path model you are using, resnet18, resnet101.')
     parser.add_argument('--learning_rate', type=float, default=0.01, help='learning rate used for train')
-    parser.add_argument('--data', type=str, default='', help='path of training data')
+    parser.add_argument('--data', type=str, default='data', help='path of training data')
     parser.add_argument('--num_workers', type=int, default=4, help='num of workers')
     parser.add_argument('--num_classes', type=int, default=32, help='num of object classes (with void)')
     parser.add_argument('--cuda', type=str, default='0', help='GPU ids used for training')
@@ -155,7 +151,7 @@ def main(params):
     parser.add_argument('--pretrained_model_path', type=str, default=None, help='path to pretrained model')
     parser.add_argument('--save_model_path', type=str, default=None, help='path to save model')
     parser.add_argument('--optimizer', type=str, default='rmsprop', help='optimizer, support rmsprop, sgd, adam')
-    parser.add_argument('--loss', type=str, default='dice', help='loss function, dice or crossentropy')
+    parser.add_argument('--loss', type=str, default='crossentropy', help='loss function, dice or crossentropy')
 
     args = parser.parse_args(params)
 
@@ -163,7 +159,7 @@ def main(params):
     train_path = args.data
     train_transform, val_transform = get_transform()
 
-    dataset_train = VOC(train_path, image_set="train", download=True, transforms=train_transform)
+    dataset_train = VOC(train_path, image_set="train", download=False, transforms=train_transform)
     dataloader_train = DataLoader(
         dataset_train,
         batch_size=args.batch_size,
@@ -171,7 +167,7 @@ def main(params):
         num_workers=args.num_workers,
         drop_last=True
     )
-    dataset_val = VOC(train_path, image_set="val", download=True, transforms=val_transform)
+    dataset_val = VOC(train_path, image_set="val", download=False, transforms=val_transform)
     dataloader_val = DataLoader(
         dataset_val,
         batch_size=args.batch_size,
@@ -183,7 +179,7 @@ def main(params):
     os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda
     model = BiSeNet(args.num_classes, args.context_path)
     if torch.cuda.is_available() and args.use_gpu:
-        model = torch.nn.DataParallel(model).cuda()
+        model = model.cuda()
 
     # build optimizer
     if args.optimizer == 'rmsprop':
@@ -210,13 +206,13 @@ def main(params):
 
 if __name__ == '__main__':
     params = [
-        '--num_epochs', '1000',
-        '--learning_rate', '2.5e-2',
-        '--data', './CamVid',
+        '--num_epochs', '30',
+        '--learning_rate', '1e-3',
+        '--data', 'data',
         '--num_workers', '8',
-        '--num_classes', '12',
+        '--num_classes', '21',
         '--cuda', '0',
-        '--batch_size', '4',
+        '--batch_size', '16',
         '--save_model_path', './checkpoints_18_sgd',
         '--context_path', 'resnet18',  # set resnet18 or resnet101, only support resnet18 and resnet101
         '--optimizer', 'sgd',
