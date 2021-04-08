@@ -2,6 +2,7 @@
 
 # use this script in the destination folder.
 # such as add cd /home/datasets
+cd data
 
 wget http://host.robots.ox.ac.uk/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar
 tar -xf VOCtrainval_11-May-2012.tar
@@ -15,8 +16,3 @@ unzip SegmentationClassAug.zip
 unzip SegmentationClassAug_Visualization.zip
 unzip list.zip
 mv list splits
-
-# then link SegmentationClassAug into annotations
-#  and link JPEGImages into images
-ln -s JPEGImages images
-ln -s SegmentationClassAug annotations

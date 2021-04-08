@@ -1,6 +1,5 @@
 import os.path as osp
 import torch.utils.data as data
-import numpy as np
 
 from PIL import Image
 
@@ -27,46 +26,56 @@ classes = {
     19: 'train',
     20: 'tvmonitor'
 }
-groups_list = ['person', 'animals', 'vehicles', 'indoor']
-groups = {
-    'person': [15],
-    'animals': [3, 8, 10, 12, 13, 17],
-    'vehicles': [1, 2, 4, 6, 7, 14, 19],
-    'indoor': [5, 9, 11, 16, 18, 20]
-}
-
 
 class VOCSegmentation(data.Dataset):
     """`Pascal VOC <http://host.robots.ox.ac.uk/pascal/VOC/>`_ Segmentation Dataset.
     Args:
         root (string): Root directory of the VOC Dataset.
-        train (bool): Use train (True) or test (False) split
+        image_set (string, optional): Select the image_set to use, ``train``, ``trainval`` or ``val``
+        is_aug (bool, optional): If you want to use the augmented train set or not (default is True)
         transform (callable, optional): A function/transform that  takes in an PIL image
             and returns a transformed version. E.g, ``transforms.RandomCrop``
     """
 
-    def __init__(self, root="data", train=True, transform=None):
-
-        if train:
-            split = 'train_ids'
-        else:
-            split = 'test_ids'
+    def __init__(self,
+                 root,
+                 image_set='train',
+                 is_aug=True,
+                 transform=None):
 
         self.root = osp.expanduser(root)
+        self.year = "2012"
+
         self.transform = transform
 
-        voc_root = osp.join(self.root, "voc/dataset/")
-        splits_dir = osp.join(self.root, "voc/split/")
+        self.image_set = image_set
+        base_dir = "PascalVOC12"
+        voc_root = osp.join(self.root, base_dir)
+        splits_dir = osp.join(voc_root, 'splits')
 
         if not osp.isdir(voc_root):
-            raise RuntimeError(f'Dataset not found in {voc_root}.' +
-                               f' Download it with download_voc and then link it into {voc_root}.')
+            raise RuntimeError('Dataset not found or corrupted.' +
+                               ' You can use the script in data to download it')
 
-        self.images = np.load(osp.join(splits_dir, split + '.npy'))
+        if is_aug and image_set == 'train':
+            mask_dir = osp.join(voc_root, 'SegmentationClassAug')
+            assert osp.exists(
+                mask_dir), "SegmentationClassAug not found"
+            split_f = osp.join(splits_dir, 'train_aug.txt')
+        else:
+            split_f = osp.join(splits_dir, image_set.rstrip('\n') + '.txt')
 
-        annotation_folder = "annotations"
-        self.images = [(osp.join(voc_root, "images", i + ".jpg"), osp.join(voc_root, annotation_folder, i + ".png"))
-                       for i in self.images]
+        if not osp.exists(split_f):
+            raise ValueError(
+                'Wrong image_set entered! Please use image_set="train" '
+                'or image_set="trainval" or image_set="val"')
+
+        # remove leading \n
+        with open(osp.join(split_f), "r") as f:
+            file_names = [x[:-1].split(' ') for x in f.readlines()]
+
+        # REMOVE FIRST SLASH OTHERWISE THE JOIN WILL start from root
+        self.images = [(osp.join(voc_root, x[0][1:]), osp.join(voc_root, x[1][1:])) for x in file_names]
 
     def __getitem__(self, index):
         """

@@ -1,13 +1,12 @@
 import argparse
 from dataset.transform import *
-from torchvision.datasets import VOCSegmentation as VOC
+from dataset.voc import VOCSegmentation as VOC
 from torch.utils.data import DataLoader
-from dataset.CamVid import CamVid
 import os
 from model.build_BiSeNet import BiSeNet
 import torch
 from torch.utils.tensorboard import SummaryWriter
-import tqdm
+from tqdm.notebook import tqdm
 import numpy as np
 from utils import poly_lr_scheduler
 from utils import reverse_one_hot, compute_global_accuracy, fast_hist, \
@@ -86,7 +85,7 @@ def train(args, model, optimizer, dataloader_train, dataloader_val):
     for epoch in range(args.num_epochs):
         lr = poly_lr_scheduler(optimizer, args.learning_rate, iter=epoch, max_iter=args.num_epochs)
         model.train()
-        tq = tqdm.tqdm(total=len(dataloader_train) * args.batch_size)
+        tq = tqdm(total=len(dataloader_train) * args.batch_size)
         tq.set_description('epoch %d, lr %f' % (epoch, lr))
         loss_record = []
         for i, (data, label) in enumerate(dataloader_train):
@@ -107,7 +106,6 @@ def train(args, model, optimizer, dataloader_train, dataloader_val):
             step += 1
             writer.add_scalar('loss_step', loss, step)
             loss_record.append(loss.item())
-            print('\r')
         tq.close()
         loss_train_mean = np.mean(loss_record)
         writer.add_scalar('epoch/loss_epoch_train', float(loss_train_mean), epoch)
@@ -116,7 +114,7 @@ def train(args, model, optimizer, dataloader_train, dataloader_val):
             if not os.path.isdir(args.save_model_path):
                 os.mkdir(args.save_model_path)
             torch.save(model.module.state_dict(),
-                       os.path.join(args.save_model_path, 'latest_dice_loss.pth'))
+                       os.path.join(args.save_model_path, 'model.pth'))
 
         if epoch % args.validation_step == 0 and epoch != 0:
             precision, miou = val(args, model, dataloader_val)
@@ -135,10 +133,8 @@ def main(params):
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_epochs', type=int, default=300, help='Number of epochs to train for')
     parser.add_argument('--epoch_start_i', type=int, default=0, help='Start counting epochs from this number')
-    parser.add_argument('--checkpoint_step', type=int, default=100, help='How often to save checkpoints (epochs)')
+    parser.add_argument('--checkpoint_step', type=int, default=10, help='How often to save checkpoints (epochs)')
     parser.add_argument('--validation_step', type=int, default=10, help='How often to perform validation (epochs)')
-    parser.add_argument('--crop_height', type=int, default=720, help='Height of cropped/resized input image to network')
-    parser.add_argument('--crop_width', type=int, default=960, help='Width of cropped/resized input image to network')
     parser.add_argument('--batch_size', type=int, default=1, help='Number of images in each batch')
     parser.add_argument('--context_path', type=str, default="resnet101",
                         help='The context path model you are using, resnet18, resnet101.')
@@ -149,7 +145,7 @@ def main(params):
     parser.add_argument('--cuda', type=str, default='0', help='GPU ids used for training')
     parser.add_argument('--use_gpu', type=bool, default=True, help='whether to user gpu for training')
     parser.add_argument('--pretrained_model_path', type=str, default=None, help='path to pretrained model')
-    parser.add_argument('--save_model_path', type=str, default=None, help='path to save model')
+    parser.add_argument('--save_model_path', type=str, default="checkpoints", help='path to save model')
     parser.add_argument('--optimizer', type=str, default='rmsprop', help='optimizer, support rmsprop, sgd, adam')
     parser.add_argument('--loss', type=str, default='crossentropy', help='loss function, dice or crossentropy')
 
@@ -159,7 +155,7 @@ def main(params):
     train_path = args.data
     train_transform, val_transform = get_transform()
 
-    dataset_train = VOC(train_path, image_set="train", download=False, transforms=train_transform)
+    dataset_train = VOC(train_path, image_set="train", transform=train_transform)
     dataloader_train = DataLoader(
         dataset_train,
         batch_size=args.batch_size,
@@ -167,7 +163,7 @@ def main(params):
         num_workers=args.num_workers,
         drop_last=True
     )
-    dataset_val = VOC(train_path, image_set="val", download=False, transforms=val_transform)
+    dataset_val = VOC(train_path, image_set="val", transform=val_transform)
     dataloader_val = DataLoader(
         dataset_val,
         batch_size=args.batch_size,
