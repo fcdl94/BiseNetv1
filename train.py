@@ -6,7 +6,7 @@ import os
 from model.build_BiSeNet import BiSeNet
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 import numpy as np
 from utils import poly_lr_scheduler
 from utils import reverse_one_hot, compute_global_accuracy, fast_hist, \
